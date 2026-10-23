@@ -1530,6 +1530,26 @@ function resolverAuto(a, activo, usuario, ctx){
   }
 }
 /* Respuestas con que arranca el formulario: solo las preguntas automáticas. */
+/* Respuestas que el celular recuerda entre registros (pregunta.recordar), por ejemplo el
+   responsable: quien recorre todos los equipos no escribe su nombre y cédula cada vez.
+   Duran 12 horas; después se vuelven a pedir. */
+const CLAVE_RECORDAR = 'cnv_recordar';
+function recordados(preguntas){
+  const m = leerLocal(CLAVE_RECORDAR, {}) || {}; const o = {};
+  (preguntas || []).forEach(q => { const r = q.recordar && m[q.id]; if (r && Date.now() - r.t < 12 * 3600e3) o[q.id] = r.v; });
+  return o;
+}
+function recordar(preguntas, valores){
+  const m = leerLocal(CLAVE_RECORDAR, {}) || {};
+  (preguntas || []).forEach(q => { if (q.recordar && !vacio(valores[q.id])) m[q.id] = { v: valores[q.id], t: Date.now() }; });
+  escribirLocal(CLAVE_RECORDAR, m);
+}
+/* Quién hizo un registro: el responsable que se escribió en el formulario y la cuenta con que se envió. */
+function quien(r){
+  const n = r.valores && r.valores.q_resp_nombre;
+  return n ? n + (r.valores.q_resp_cedula ? ' (C.C. ' + r.valores.q_resp_cedula + ')' : '') + ' · ' + r.usuario : r.usuario;
+}
+function quienCorto(r){ return (r.valores && r.valores.q_resp_nombre) || r.usuario; }
 function valoresIniciales(preguntas, activo, usuario, ctx){
   const v = {};
   preguntas.forEach(q => { if (q.autollenado) v[q.id] = resolverAuto(q.autollenado, activo, usuario, ctx); });
@@ -1731,7 +1751,10 @@ function plantillaTemperatura(fijos){
     P('q_accprod','parrafo','Producto fuera del límite: ¿qué se hizo?', { requerida:true, ayuda:'Reubicá los productos y solicitá la revisión de inmediato.', condicion:{ qid:PR, op:'alerta', valor:'' } }),
     P('q_cong','temperatura','Temperatura del producto congelado', { redondear:true, ayuda:'No introduzcas el termómetro: ubicalo en medio de dos productos.', alerta: alerta({ modo:'rango', max:-18, excepciones:[] }), condicion:{ qid:'@activo.subtipo', op:'igual', valor:'CONGELACION' } }),
     P('q_descong','parrafo','El producto comenzó a descongelarse y no debe volver a congelarse. ¿Qué se hizo con él?', { requerida:true, condicion:{ qid:CG, op:'mayor', valor:'-1' } }),
-    P('q_obs','parrafo','Observaciones', { requerida:false })
+    P('q_obs','parrafo','Observaciones', { requerida:false }),
+    P('h9','seccion','Responsable del registro', { requerida:false }),
+    P('q_resp_nombre','texto','Nombre completo de quien tomó la temperatura', { recordar:true, ayuda:'Si sos la misma persona del registro anterior, ya viene lleno.' }),
+    P('q_resp_cedula','numero','Número de cédula', { recordar:true, ayuda:'Solo números, sin puntos.' })
   ];
 }
 /* Ejemplo de ramificación simple: Sí → productos usados; No → motivo. */
@@ -1827,6 +1850,18 @@ function generarCodigos(db, sedeNombre, seccionNombre, tipo, subtipo, cantidad){
  * registros en los 4 horarios (con algunas alertas para ver el tablero).
  * Se usa al abrir por primera vez o desde Sistema → "Volver a datos de demostración".
  */
+/* Cuentas generales de las áreas (una por sede y área). */
+const CUENTAS_AREA = [
+  { id:'u3', nombre:'PUNTO 14 · CARNES', sede:'SC PUNTO 14', areas:['CARNES'] },
+  { id:'u5', nombre:'PUNTO 14 · FRUVER', sede:'SC PUNTO 14', areas:['FRUVER'] },
+  { id:'u6', nombre:'PUNTO 14 · PGC Y LÁCTEOS', sede:'SC PUNTO 14', areas:['PGC','PGC LACTEOS'] },
+  { id:'u7', nombre:'PUNTO 14 · PANADERÍA Y GOURMET', sede:'SC PUNTO 14', areas:['PANADERIA Y RESTAURANTE','PUNTO GOURMET'] },
+  { id:'u9', nombre:'PUNTO 14 · POLLO CAÑAVERAL', sede:'SC PUNTO 14', areas:['POLLO CAÑAVERAL'] },
+  { id:'u4', nombre:'CEDI YUMBO · PRODUCCIÓN', sede:'PRODUCCION PANADERIA CEDI YUMBO', areas:[] },
+  { id:'u8', nombre:'PUNTO 3 · DEMO', sede:'SC PUNTO 3 (DEMO)', areas:[] }
+];
+/* Responsables inventados para los registros de demostración: [nombre, cédula]. */
+const RESPONSABLES_DEMO = [['Carlos Rentería','1144052311'],['Yesenia Castillo','1130667482'],['Andrés Valencia','94512870'],['Marta Lucumí','31987456'],['Diana Mosquera','1107845120'],['Jhon Caicedo','16789045']];
 function sembrar(){
   const rnd = mulberry32(1414);
   const db = {
@@ -1839,12 +1874,8 @@ function sembrar(){
     usuarios: [
       { id:'u1', nombre:'Felipe', rol:'maestro', sede:'', estado:'activo' },
       { id:'u2', nombre:'Laura Gómez', rol:'admin', sede:'', estado:'activo', cargo:'Coordinación de calidad' },
-      { id:'u3', nombre:'Carlos Rentería', rol:'operario', sede:'SC PUNTO 14', areas:['CARNES'], estado:'activo', cargo:'Operario de carnes' },
-      { id:'u5', nombre:'Yesenia Castillo', rol:'operario', sede:'SC PUNTO 14', areas:['FRUVER'], estado:'activo', cargo:'Operaria de fruver' },
-      { id:'u6', nombre:'Andrés Valencia', rol:'operario', sede:'SC PUNTO 14', areas:['PGC','PGC LACTEOS'], estado:'activo', cargo:'Operario de PGC y lácteos' },
-      { id:'u7', nombre:'Marta Lucumí', rol:'operario', sede:'SC PUNTO 14', areas:['PANADERIA Y RESTAURANTE','PUNTO GOURMET'], estado:'activo', cargo:'Operaria de panadería' },
-      { id:'u4', nombre:'Diana Mosquera', rol:'operario', sede:'PRODUCCION PANADERIA CEDI YUMBO', areas:[], estado:'activo', cargo:'Operaria de producción' },
-      { id:'u8', nombre:'Jhon Caicedo', rol:'operario', sede:'SC PUNTO 3 (DEMO)', areas:[], estado:'activo', cargo:'Operario (sede de demostración)' }
+      // Cuentas GENERALES por sede y área: la persona que registra escribe su nombre y cédula en el formulario.
+      ...CUENTAS_AREA.map(c => Object.assign({ rol:'operario', estado:'activo', cargo:'Cuenta general del área' }, c))
     ],
     activos: [], formularios: [], respuestas: [], revisiones: [], auditoria: []
   };
@@ -1910,6 +1941,8 @@ function sembrar(){
         }
         if (a.subtipo === 'CONGELACION') valores.q_cong = String(Math.min(val, -18) - Math.floor(rnd() * 2));
         const resp = db.usuarios.find(u => u.rol === 'operario' && u.sede === a.sede && (u.areas || []).includes(act.area)) || db.usuarios.find(u => u.rol === 'operario' && u.sede === a.sede) || db.usuarios.find(u => u.id === 'u3');
+        const [rn, rc] = RESPONSABLES_DEMO[Math.floor(rnd() * RESPONSABLES_DEMO.length)];
+        valores.q_resp_nombre = rn; valores.q_resp_cedula = rc;
         db.respuestas.push({ id:'r' + uid(), formId:'f_temp', version:1, usuarioId: resp.id, usuario: resp.nombre, fecha: fecha.toISOString(), turno: h, activo:a.codigo, sede:a.sede, seccion:a.seccion, valores, alertas });
       });
     });
@@ -2077,7 +2110,7 @@ function Puntos({ horarios, reg, dia }){
  *   - revisionAbierta: si el equipo tiene un caso de revisión sin cerrar, se avisa.
  */
 function Formulario({ titulo, descripcion, instructivo, preguntas, activo, usuario, turno, progreso, lecturas, revisionAbierta, onEnviar, previa }){
-  const [valores, setValores] = useState(() => valoresIniciales(preguntas, activo, usuario, { turno }));
+  const [valores, setValores] = useState(() => Object.assign(valoresIniciales(preguntas, activo, usuario, { turno }), recordados(preguntas)));
   const [errores, setErrores] = useState({});
   const [enviando, setEnviando] = useState(false);
   const vistos = useRef(new Set());
@@ -2109,6 +2142,7 @@ function Formulario({ titulo, descripcion, instructivo, preguntas, activo, usuar
     const limpio = {};
     visibles.forEach(q => { if (q.tipo === 'seccion' || vacio(valores[q.id])) return; limpio[q.id] = (q.tipo === 'temperatura' || q.tipo === 'numero') && q.redondear && !isNaN(valorNum(q, valores[q.id])) ? String(valorNum(q, valores[q.id])) : valores[q.id]; });
     const alertas = visibles.filter(q => enAlerta(q, valores[q.id], activo, valores)).map(q => q.id);
+    recordar(preguntas, limpio);
     setEnviando(true); await onEnviar({ valores: limpio, alertas }); setEnviando(false);
   };
   const aproximar = q => { const v = valores[q.id]; if (q.redondear && !vacio(v) && !isNaN(valorNum(q, v))) poner(q.id, String(valorNum(q, v))); };
@@ -2212,7 +2246,7 @@ function Login({ db, entrar, equipoPendiente }){
   const desc = {
     maestro: 'Configura la plataforma: usuarios, sedes, secciones, equipos, QR y respaldos.',
     admin: 'Diseña los formularios, revisa resultados, tableros y exporta a Excel.',
-    operario: 'Escanea el QR del equipo y llena el registro en segundos desde el celular.'
+    operario: 'Cuentas generales de cada área. Quien registra escribe su nombre y cédula en el formulario.'
   };
   return html`<div className="login">
     <section className="login-izq">
@@ -2264,11 +2298,11 @@ function EntradaEscaneo({ db, codigo, entrar, actual, seguir }){
       ${activo ? html`<p>${activo.sede} · ${activo.seccion}<br/><span className="muted">${tipoCompleto(activo)}</span></p>`
         : html`<p className="alerta-caja">Este código no está en los equipos registrados. Revisá el QR o avisale al administrador.</p>`}
     </div>
-    <h3 style=${{ fontSize: 18, margin:'18px 0 8px' }}>¿Quién registra?</h3>
+    <h3 style=${{ fontSize: 18, margin:'18px 0 8px' }}>Cuenta del área</h3>
     ${delEquipo.length ? html`<div className="pila">${delEquipo.map(boton)}</div>`
-      : html`<p className="muted chico">Ningún operario tiene asignada el área de este equipo.</p>`}
-    ${otros.length > 0 && html`<details style=${{ marginTop: 14 }}><summary className="chico">Otros operarios</summary><div className="pila" style=${{ marginTop: 8 }}>${otros.map(boton)}</div></details>`}
-    <p className="muted chico" style=${{ marginTop: 14 }}>Este celular recuerda a quien elijas: la próxima vez que escanees un QR se abre el formulario directo.</p>
+      : html`<p className="muted chico">Ninguna cuenta tiene asignada el área de este equipo.</p>`}
+    ${otros.length > 0 && html`<details style=${{ marginTop: 14 }}><summary className="chico">Otras cuentas</summary><div className="pila" style=${{ marginTop: 8 }}>${otros.map(boton)}</div></details>`}
+    <p className="muted chico" style=${{ marginTop: 14 }}>Este celular recuerda la cuenta: la próxima vez que escanees un QR se abre el formulario directo. Tu nombre y cédula se piden al final del formulario.</p>
     ${actual && html`<button className="btn chico" style=${{ marginTop: 12 }} onClick=${seguir}>Seguir como ${actual.nombre} (ir al tablero)</button>`}
   </div>`;
 }
@@ -2744,7 +2778,7 @@ function CumplimientoHorario({ db, form, equipos, registrosHoy, horarios, sedeFi
         title=${tipoNivel === 'equipo' ? 'Clic: ver tendencia · doble clic: planilla' : 'Clic: ver detalle · doble clic: planilla'}
         onClick=${() => bajar(f)} onDoubleClick=${() => abrirPlanilla(f)} onKeyDown=${e => { if (e.key === 'Enter') bajar(f); }}>
       <span className="nom">${tipoNivel === 'equipo' ? html`<span className="codigo">${f.nombre}</span>` : f.nombre}
-        <small>${tipoNivel === 'equipo' ? f.detalle + (f.reg ? ' · ' + fmtFecha(f.reg.fecha).slice(11) + ' · ' + f.reg.usuario : '') : (f.total === 1 ? '1 equipo' : f.total + ' equipos')}</small></span>
+        <small>${tipoNivel === 'equipo' ? f.detalle + (f.reg ? ' · ' + fmtFecha(f.reg.fecha).slice(11) + ' · ' + quienCorto(f.reg) : '') : (f.total === 1 ? '1 equipo' : f.total + ' equipos')}</small></span>
       <span className="barra"><i style=${{ width: (100 * f.ok / f.total) + '%', background: f.ok === f.total ? 'var(--b-bien)' : enCurso ? 'var(--b-medio)' : 'var(--b-mal)' }}></i></span>
       <span className="num">${tipoNivel === 'equipo' ? (f.reg && qTemp && !vacio(f.reg.valores[qTemp.id]) ? f.reg.valores[qTemp.id] + ' °C' : '—') : f.ok + '/' + f.total}</span>
       ${tipoNivel === 'equipo' && f.reg && f.reg.alertas.length ? html`<span className="tag alerta">Alerta</span>` : estado(f)}
@@ -3498,7 +3532,7 @@ function Resultados({ db, avisar, inicial, alcance, usuarioId }){
           <td>${a.seccion}</td>
           <td className="celda"><b className="cuenta" style=${{ fontSize: 15 }}>${horarios.filter(h => celda[a.codigo + '|' + h]).length}/${horarios.length}</b></td>
           ${horarios.map(h => { const r = celda[a.codigo + '|' + h];
-            if (r){ const v = qT ? r.valores[qT.id] : ''; return html`<td key=${h} className="celda"><button className=${'celda-btn ' + (r.alertas.length ? 'mal' : 'bien')} title=${'Registrado por ' + r.usuario + ' a las ' + fmtFecha(r.fecha).slice(11)} onClick=${() => setDetalle(r)}>${vacio(v) ? 'Ver' : v + ' °C'}</button></td>`; }
+            if (r){ const v = qT ? r.valores[qT.id] : ''; return html`<td key=${h} className="celda"><button className=${'celda-btn ' + (r.alertas.length ? 'mal' : 'bien')} title=${'Registrado por ' + quien(r) + ' a las ' + fmtFecha(r.fecha).slice(11)} onClick=${() => setDetalle(r)}>${vacio(v) ? 'Ver' : v + ' °C'}</button></td>`; }
             return html`<td key=${h} className="celda">${vencido(h) ? html`<span className="tag aviso">Falta</span>` : html`<span className="muted">—</span>`}</td>`; })}
         </tr>`)}</tbody>
       </table></div>
@@ -3519,7 +3553,7 @@ function Resultados({ db, avisar, inicial, alcance, usuarioId }){
       <tbody>${filas.slice(0, cuantos).map(r => html`<tr key=${r.id} className="clic" onClick=${() => setDetalle(r)}>
         <td style=${{ whiteSpace:'nowrap' }}>${fmtFecha(r.fecha)}</td>
         <td>${r.turno || ''}</td>
-        <td className="codigo">${r.activo || '—'}</td><td>${r.seccion || r.sede}</td><td>${r.usuario}</td>
+        <td className="codigo">${r.activo || '—'}</td><td>${r.seccion || r.sede}</td><td>${quien(r)}</td>
         ${cols.slice(0, 4).map(q => html`<td key=${q.id}>${r.alertas.includes(q.id) ? html`<span className="tag alerta">${textoValor(q, r.valores[q.id])}</span>` : textoValor(q, r.valores[q.id]).slice(0, 60)}</td>`)}
         <td>${r.alertas.length ? html`<span className="tag alerta">Alerta</span>` : ''}</td>
       </tr>`)}</tbody>
@@ -3530,7 +3564,7 @@ function Resultados({ db, avisar, inicial, alcance, usuarioId }){
         ${r.alertas.length ? html`<span className="tag alerta">${vacio(v) ? 'Alerta' : v + ' °C'}</span>` : !vacio(v) && html`<span className="tag verde">${v} °C</span>`}
       </span>
       <span className="chico">${fmtFecha(r.fecha)}${r.turno ? ' · horario ' + r.turno : ''}</span>
-      <span className="muted chico">${r.seccion || r.sede} · ${r.usuario}</span>
+      <span className="muted chico">${r.seccion || r.sede} · ${quienCorto(r)}</span>
     </button>`; })}</div>
     ${filas.length > cuantos && html`<div className="fila" style=${{ marginTop: 10 }}>
       <span className="muted chico">Se muestran ${cuantos} de ${filas.length}. El Excel incluye todos.</span>
@@ -3538,7 +3572,7 @@ function Resultados({ db, avisar, inicial, alcance, usuarioId }){
     </div>`}<//>`}
 
     ${detalle && html`<${Modal} titulo=${detalle.activo || form.nombre} onCerrar=${() => setDetalle(null)}>
-      <p className="muted">${fmtFecha(detalle.fecha)}${detalle.turno ? ' · horario de las ' + detalle.turno : ''} · ${detalle.usuario} · versión ${detalle.version}</p>
+      <p className="muted">${fmtFecha(detalle.fecha)}${detalle.turno ? ' · horario de las ' + detalle.turno : ''} · ${quien(detalle)} · versión ${detalle.version}</p>
       <div className="pila" style=${{ marginTop: 14 }}>${(form.publicado.preguntas).filter(q => q.tipo !== 'seccion' && !vacio(detalle.valores[q.id])).map(q => html`<div key=${q.id}>
         <div className="chico muted" style=${{ fontWeight: 800 }}>${q.etiqueta}</div>
         ${q.tipo === 'foto' || q.tipo === 'firma' ? html`<img src=${detalle.valores[q.id]} alt=${q.etiqueta} style=${{ maxHeight: 200, borderRadius: 10, background:'#fff' }} />` : html`<div className=${detalle.alertas.includes(q.id) ? 'alerta-caja' : ''} style=${{ marginTop: detalle.alertas.includes(q.id) ? 4 : 0 }}>${textoValor(q, detalle.valores[q.id])}</div>`}
@@ -3874,7 +3908,7 @@ function App(){
     if (!yo || yo.rol === 'operario' || !nuevos.length) return;
     const r = nuevos[nuevos.length - 1];
     const conAlerta = nuevos.some(x => x.alertas && x.alertas.length);
-    avisar((nuevos.length > 1 ? nuevos.length + ' registros nuevos · último: ' : 'Nuevo registro: ') + r.usuario + (r.activo ? ' · ' + r.activo : '') + (r.turno ? ' · ' + r.turno : '') + (conAlerta ? ' · fuera de rango' : ''), conAlerta ? 'error' : '');
+    avisar((nuevos.length > 1 ? nuevos.length + ' registros nuevos · último: ' : 'Nuevo registro: ') + quienCorto(r) + (r.activo ? ' · ' + r.activo : '') + (r.turno ? ' · ' + r.turno : '') + (conAlerta ? ' · fuera de rango' : ''), conAlerta ? 'error' : '');
   }) : undefined, [avisar]);
   /* ÚNICA forma de modificar datos: copia, aplica el cambio, deja auditoría, muestra y guarda.
      Se arma sobre dbRef (y no dentro de setDb) para que el guardado sea un efecto que ocurre
