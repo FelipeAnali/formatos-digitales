@@ -957,15 +957,18 @@ function repoPorDefecto(){
 }
 const GITHUB_DEF = { repo: repoPorDefecto(), rama: 'datos-formatos', ruta: 'datos/db.json', token: '' };
 /* Enlace "#conectar=…" (el QR que muestra el maestro): guarda la conexión en este celular y se borra de la dirección. */
-(function(){
+/* Guarda la conexión que viene en un texto con "#conectar=…". Devuelve true si la guardó. */
+function guardarConexion(texto){
   try{
-    const m = location.hash.match(/^#conectar=(.+)$/);
-    if (!m) return;
+    const m = String(texto || '').match(/#conectar=([^\s#]+)/);
+    if (!m) return false;
     const c = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
-    if (c && c.repo && c.token) escribirLocal(CLAVE_GITHUB, Object.assign({}, GITHUB_DEF, c));
-    history.replaceState(null, '', location.pathname + location.search);
-  }catch(e){}
-})();
+    if (!c || !c.repo || !c.token) return false;
+    escribirLocal(CLAVE_GITHUB, Object.assign({}, GITHUB_DEF, c));
+    return true;
+  }catch(e){ return false; }
+}
+if (/^#conectar=/.test(location.hash)){ guardarConexion(location.hash); try{ history.replaceState(null, '', location.pathname + location.search); }catch(e){} }
 /* Con token: lee y guarda. Sin token pero publicada en GitHub Pages: SOLO LECTURA del mismo
    repositorio (es público), así cualquier navegador que abra el link ve los mismos datos. */
 function configGitHub(){
@@ -2334,20 +2337,58 @@ function EstadoConexion({ estado, onCerrarRechazo }){
  *   codigoManual → muestra el campo para escribir el código (Sistema).
  *   simulador    → botones de prueba con códigos; SOLO para demostraciones.
  */
+/* Lector de QR por software (jsQR) para los navegadores sin BarcodeDetector, como Safari en
+   iPhone. Se carga solo la primera vez que se abre el escáner. */
+let promesaJsQR = null;
+function cargarJsQR(){
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  if (!promesaJsQR) promesaJsQR = new Promise((ok, mal) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+    sc.onload = () => window.jsQR ? ok(window.jsQR) : mal(new Error('jsQR'));
+    sc.onerror = () => { promesaJsQR = null; mal(new Error('jsQR')); };
+    document.head.appendChild(sc);
+  });
+  return promesaJsQR;
+}
 function Escaner({ equipos, onCodigo, onCerrar, codigoManual, simulador }){
   const vid = useRef(null);
   const [estado, setEstado] = useState('iniciando');
   const [texto, setTexto] = useState('');
   useEffect(() => {
     let stream = null, timer = null, vivo = true;
+    /* Lo leído: el QR de "Conectar otro celular" conecta este celular; cualquier otro es un equipo. */
+    const leido = valor => {
+      if (guardarConexion(valor)){ try{ localStorage.removeItem('cnv_sesion'); }catch(e){} location.replace(location.pathname); return; }
+      onCodigo(extraerCodigo(valor));
+    };
     (async () => {
-      if (!('BarcodeDetector' in window) || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ setEstado('sin-camara'); return; }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ setEstado('sin-camara'); return; }
+      let leer;
+      try{
+        if ('BarcodeDetector' in window){
+          const det = new window.BarcodeDetector({ formats:['qr_code'] });
+          leer = async () => { const r = await det.detect(vid.current); return r.length ? r[0].rawValue : null; };
+        } else {
+          const jsQR = await cargarJsQR();
+          const lienzo = document.createElement('canvas');
+          const ctx = lienzo.getContext('2d', { willReadFrequently: true });
+          leer = async () => {
+            const v = vid.current; if (!v || !v.videoWidth) return null;
+            const esc = Math.min(1, 640 / Math.max(v.videoWidth, v.videoHeight));
+            lienzo.width = Math.round(v.videoWidth * esc); lienzo.height = Math.round(v.videoHeight * esc);
+            ctx.drawImage(v, 0, 0, lienzo.width, lienzo.height);
+            const r = jsQR(ctx.getImageData(0, 0, lienzo.width, lienzo.height).data, lienzo.width, lienzo.height, { inversionAttempts:'dontInvert' });
+            return r ? r.data : null;
+          };
+        }
+      }catch(e){ setEstado('sin-camara'); return; }
       try{
         stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
         if (!vivo){ stream.getTracks().forEach(t => t.stop()); return; }
         vid.current.srcObject = stream; await vid.current.play();
-        const det = new window.BarcodeDetector({ formats:['qr_code'] }); setEstado('leyendo');
-        const tick = async () => { if (!vivo) return; try{ const r = await det.detect(vid.current); if (r.length){ onCodigo(extraerCodigo(r[0].rawValue)); return; } }catch(e){} timer = setTimeout(tick, 280); };
+        setEstado('leyendo');
+        const tick = async () => { if (!vivo) return; try{ const v = await leer(); if (v){ leido(v); return; } }catch(e){} timer = setTimeout(tick, 220); };
         tick();
       }catch(e){ setEstado('sin-permiso'); }
     })();
@@ -3713,7 +3754,7 @@ function ConexionGitHub(){
       <button className="btn chico" onClick=${() => { if (!confirm('Este navegador va a seguir viendo los datos del repositorio, pero ya no va a poder guardar. ¿Continuar?')) return; escribirLocal(CLAVE_GITHUB, null); escribirLocal('cnv_gh_cache', null); try{ localStorage.removeItem('cnv_sesion'); }catch(e){} location.reload(); }}>Desconectar este navegador</button>
     </div>`}
     ${verQR && actual && actual.token && html`<${Modal} titulo="Conectar otro celular" onCerrar=${() => setVerQR(false)}>
-      <p className="chico">Con la cámara del celular escaneá este código <b>una sola vez</b>: queda conectado al repositorio. Después ya puede escanear los QR de los equipos.</p>
+      <p className="chico">Escaneá este código <b>una sola vez</b> con la cámara del celular o con el botón <b>Escanear</b> de la app: queda conectado al repositorio. Se pueden conectar todos los celulares que quieras.</p>
       <div style=${{ maxWidth: 260, margin:'12px auto', background:'#fff', padding: 8, borderRadius: 12 }}><${QR} texto=${enlaceConectar(actual)} tam=${4} /></div>
       <p className="chico"><span className="tag aviso">Importante</span> Este código lleva el token: mostralo solo en pantalla, no lo imprimas ni lo pegues en los equipos.</p>
       <div className="fila">
