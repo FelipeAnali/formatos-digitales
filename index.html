@@ -939,7 +939,7 @@ function AdaptadorServidor(url){
    (crear / actualizar / borrar, registro por registro) y se sube con el "sha" que se
    leyó. Si otro celular guardó en el medio, GitHub responde 409 y se repite con la
    versión nueva. Sin señal, la cola espera y se reintenta sola.
-   Cada 30 s (con la app a la vista) revisa si alguien más guardó y trae los datos nuevos.
+   Cada 10 s (con la app a la vista) revisa si alguien más guardó y trae los datos nuevos.
    Fotos y firmas se suben como archivos aparte a la misma rama.
 
    OJO: el repositorio es público, así que el archivo de datos también se puede leer.
@@ -1106,7 +1106,7 @@ function AdaptadorGitHub(conf){
   if (typeof window !== 'undefined'){
     window.addEventListener('online', () => { enviarCola(); revisarCambios(); });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible'){ enviarCola(); revisarCambios(); } });
-    setInterval(() => { if (document.visibilityState === 'visible') revisarCambios(); }, 30000);
+    setInterval(() => { if (document.visibilityState === 'visible') revisarCambios(); }, 10000);
   }
 
   return {
@@ -3790,8 +3790,20 @@ function App(){
     setErrorCarga(aviso || (Adaptador.tipo === 'servidor' ? 'Sin conexión y sin datos guardados en este celular. Conectate a internet y recargá.' : 'No hay datos para mostrar.'));
   }).catch(e => { if (e && e.sesion) setConSesion(false); else setErrorCarga(e && e.message ? e.message : 'No se pudieron cargar los datos.'); }); }, [conSesion]);
   /* GitHub: cuando otro celular o computador guarda, llegan los datos nuevos solos. */
-  useEffect(() => Adaptador.alRecibirDatos ? Adaptador.alRecibirDatos(d => { const m = migrar(d); if (m.db) reemplazarDb(m.db); }) : undefined, []);
   const avisar = useCallback((msg, tipo) => { setAviso({ msg, tipo }); clearTimeout(timer.current); timer.current = setTimeout(() => setAviso(null), 4200); }, []);
+  /* GitHub: cuando otro celular o computador guarda, llegan los datos nuevos solos.
+     Al administrador y al maestro se les avisa de cada registro que llegó (en vivo). */
+  useEffect(() => Adaptador.alRecibirDatos ? Adaptador.alRecibirDatos(d => {
+    const m = migrar(d); if (!m.db) return;
+    const antes = new Set(((dbRef.current && dbRef.current.respuestas) || []).map(r => r.id));
+    const yo = usuarioRef.current;
+    const nuevos = dbRef.current ? m.db.respuestas.filter(r => !antes.has(r.id) && (!yo || r.usuarioId !== yo.id)) : [];
+    reemplazarDb(m.db);
+    if (!yo || yo.rol === 'operario' || !nuevos.length) return;
+    const r = nuevos[nuevos.length - 1];
+    const conAlerta = nuevos.some(x => x.alertas && x.alertas.length);
+    avisar((nuevos.length > 1 ? nuevos.length + ' registros nuevos · último: ' : 'Nuevo registro: ') + r.usuario + (r.activo ? ' · ' + r.activo : '') + (r.turno ? ' · ' + r.turno : '') + (conAlerta ? ' · fuera de rango' : ''), conAlerta ? 'error' : '');
+  }) : undefined, [avisar]);
   /* ÚNICA forma de modificar datos: copia, aplica el cambio, deja auditoría, muestra y guarda.
      Se arma sobre dbRef (y no dentro de setDb) para que el guardado sea un efecto que ocurre
      una sola vez; dos commits seguidos se encadenan bien porque dbRef se actualiza al instante. */
