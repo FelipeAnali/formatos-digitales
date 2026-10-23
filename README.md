@@ -38,7 +38,7 @@ SC PUNTO 14 desde Equipos y QR, o mostrarlos en una segunda pantalla con "Ver QR
 4. **En vivo:** a los pocos segundos el computador muestra "Nuevo registro: Carlos Rentería…" y el
    tablero se actualiza solo.
 5. **Una alerta:** escanear de nuevo y poner una temperatura fuera de rango (ej. -5 en congelación):
-   el formulario pide la acción tomada y en el computador el aviso sale en rojo.
+   el formulario marca la alerta y pide datos adicionales; en el computador el aviso sale en rojo.
 6. **El operario solo ve lo suyo:** en el celular, pestaña Resultados (solo su área).
 
 ## Cuidado
