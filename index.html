@@ -2053,6 +2053,38 @@ function Login({ db, entrar, equipoPendiente }){
 }
 
 /**
+ * Entrada al escanear un QR sin operario elegido en este celular: muestra el equipo y,
+ * arriba, los operarios de su área. Un toque y se abre el formulario de ESE equipo.
+ * El operario queda recordado en el celular: los siguientes escaneos abren el formulario directo.
+ *   actual → si entró un administrador o maestro, botón para seguir con su usuario.
+ */
+function EntradaEscaneo({ db, codigo, entrar, actual, seguir }){
+  const activo = db.activos.find(a => a.codigo === codigo);
+  const operarios = db.usuarios.filter(u => u.rol === 'operario' && u.estado === 'activo');
+  const delEquipo = activo ? operarios.filter(u => equipoEsDe(db, u, activo)) : [];
+  const otros = operarios.filter(u => !delEquipo.includes(u));
+  const boton = u => html`<button key=${u.id} className="usuario-btn" onClick=${() => entrar(u.id)}>
+    <span><b>${u.nombre}</b><br/><span className="muted chico">${(u.sede || 'Sin sede') + ' · ' + textoAreas(u)}</span></span>
+    <span className="tag">Registrar</span>
+  </button>`;
+  return html`<div className="page" style=${{ maxWidth: 520, margin:'0 auto', padding: 16 }}>
+    <div className="sello" style=${{ color:'var(--forest)', fontWeight: 800, marginBottom: 10 }}>Supertiendas Cañaveral</div>
+    <div className="panel pila">
+      <p className="muted chico">Escaneaste el equipo</p>
+      <h2 style=${{ fontSize: 22 }}>${codigo}</h2>
+      ${activo ? html`<p>${activo.sede} · ${activo.seccion}<br/><span className="muted">${tipoCompleto(activo)}</span></p>`
+        : html`<p className="alerta-caja">Este código no está en los equipos registrados. Revisá el QR o avisale al administrador.</p>`}
+    </div>
+    <h3 style=${{ fontSize: 18, margin:'18px 0 8px' }}>¿Quién registra?</h3>
+    ${delEquipo.length ? html`<div className="pila">${delEquipo.map(boton)}</div>`
+      : html`<p className="muted chico">Ningún operario tiene asignada el área de este equipo.</p>`}
+    ${otros.length > 0 && html`<details style=${{ marginTop: 14 }}><summary className="chico">Otros operarios</summary><div className="pila" style=${{ marginTop: 8 }}>${otros.map(boton)}</div></details>`}
+    <p className="muted chico" style=${{ marginTop: 14 }}>Este celular recuerda a quien elijas: la próxima vez que escanees un QR se abre el formulario directo.</p>
+    ${actual && html`<button className="btn chico" style=${{ marginTop: 12 }} onClick=${seguir}>Seguir como ${actual.nombre} (ir al tablero)</button>`}
+  </div>`;
+}
+
+/**
  * Entrada con usuario y contraseña. Se usa cuando hay servidor (Adaptador.requiereSesion).
  * onEntrar(usuario) recibe el usuario que devolvió el servidor.
  */
@@ -3645,7 +3677,11 @@ function App(){
 
   // Con servidor el usuario viene del inicio de sesión; si no está en los datos, se vuelve a entrar.
   if (!usuario && Adaptador.requiereSesion) return html`<${LoginServidor} equipoPendiente=${equipoURL} onEntrar=${u => { try{ localStorage.setItem('cnv_sesion', u.id); }catch(e){} setSesion(u.id); }} />`;
+  // Escaneo de un QR: directo a elegir quién registra (sin la pantalla de bienvenida).
+  if (!usuario && equipoURL) return html`<${React.Fragment}><${EntradaEscaneo} db=${db} codigo=${equipoURL} entrar=${entrar} />${toast}<//>`;
   if (!usuario) return html`<${React.Fragment}><${Login} db=${db} entrar=${entrar} equipoPendiente=${equipoURL} />${toast}<//>`;
+  // Un administrador o maestro que escanea: el formulario lo llena un operario.
+  if (usuario.rol !== 'operario' && equipoURL) return html`<${React.Fragment}><${EntradaEscaneo} db=${db} codigo=${equipoURL} entrar=${entrar} actual=${usuario} seguir=${() => { setEquipoURL(null); try{ history.replaceState(null, '', location.pathname); }catch(e){} }} />${toast}<//>`;
   if (usuario.rol === 'operario') return html`<${React.Fragment}><${Operario} db=${db} usuario=${usuario} commit=${commit} salir=${salir} avisar=${avisar} equipoInicial=${equipoURL} limpiarEquipoInicial=${() => setEquipoURL(null)} />${toast}<//>`;
 
   const ir = (v, extra) => { setRuta(Object.assign({ v }, extra || {})); setMenu(false); const m = document.querySelector('.main'); if (m) m.scrollTop = 0; };
