@@ -10,7 +10,9 @@ App de una sola página para registrar la temperatura de neveras y cuartos frío
 Este mismo repositorio funciona como base de datos: todo queda en `datos/db.json` de la rama
 `datos-formatos`, que la app crea sola la primera vez. Las fotos y firmas quedan en `datos/archivos/`.
 Lo que se registra en un celular aparece en los demás celulares y en el computador (revisa cada 10 segundos y le avisa al administrador).
-Un navegador que no esté conectado sigue funcionando en modo local (sus datos quedan solo ahí).
+Cualquier navegador que abra el link **ve** los mismos datos (solo lectura, sin configurar nada). Para **guardar**
+hace falta conectarlo con el token (pasos 3 y 4); si alguien registra sin estar conectado, queda guardado en
+ese navegador con un aviso y se envía solo apenas se conecte.
 
 ## Puesta en marcha (una sola vez)
 
